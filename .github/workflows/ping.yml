@@ -1,0 +1,81 @@
+name: HF Health Ping (Multi Endpoint)
+
+on:
+  schedule:
+    # 00:00 UTC ≈ 07:00 WIB
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping
+        env:
+          # Format: tiap URL dipisah newline
+          HF_HEALTH_URLS: ${{ secrets.HF_HEALTH_URLS }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HF_HEALTH_URLS:-}" ]]; then
+            echo "❌ Missing URL"
+            exit 1
+          fi
+
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            echo "❌ Missing TOKEN"
+            exit 1
+          fi
+
+          # Split newline-separated URLs into array
+          mapfile -t URLS <<< "$HF_HEALTH_URLS"
+
+          echo "🔎 Total endpoints: ${#URLS[@]}"
+          FAIL=0
+
+          for URL in "${URLS[@]}"; do
+            # Trim whitespace
+            URL="$(echo "$URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [[ -z "$URL" ]] && continue
+
+            echo ""
+            echo "➡️  Checking: $URL"
+
+            OK=0
+            for i in 1 2 3; do
+              CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+                -H "Authorization: Bearer $HF_TOKEN" \
+                -H "Accept: application/json" \
+                "$URL" || echo "000")
+
+              echo "   Attempt $i/3 -> HTTP $CODE"
+
+              if [[ "$CODE" == "200" ]]; then
+                OK=1
+                break
+              fi
+
+              # Backoff ringan biar sopan
+              sleep $((i * 2))
+            done
+
+            if [[ "$OK" -ne 1 ]]; then
+              echo "❌ FAILED after 3 retries"
+              FAIL=1
+            else
+              echo "✅ OK"
+            fi
+          done
+
+          if [[ "$FAIL" -ne 0 ]]; then
+            echo ""
+            echo "❌ One or more endpoints failed."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ All endpoints healthy."
