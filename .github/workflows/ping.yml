@@ -1,4 +1,4 @@
-name: HF Health Ping (Multi Endpoint)
+name: Ping
 
 on:
   schedule:
